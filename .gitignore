@@ -47,3 +47,7 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+Notes/main.aux
+Notes/main.log
+Notes/main.synctex.gz
+Notes/main.toc
