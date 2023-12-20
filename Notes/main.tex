@@ -4,6 +4,7 @@
 \usepackage{amsfonts}
 \usepackage{amsmath}
 \usepackage{parskip}
+\usepackage{hyperref}
 
 \title{Statistical Neuroimaging}
 \author{Joel Winterton}
@@ -13,5 +14,39 @@
 \maketitle
 \tableofcontents
 \chapter{Introduction}
+The current general aim of the project is to explore and implement methods that identify brain lesions from an MRI scan.  The dataset that we have is 36 people, and several other datasets are similarly sized. 
+
+\section{Random Forests}
+The primary method to be explored is using Random Forests.
+\begin{itemize}
+	\item There will need to be significant changes to learning process so as to be applicable to 2D images (or indeed 3D images). 
+	\item Another complication is that the images are anisotropic, and so either pre-processing correction is needed, or the learning process will need to take this into account.
+\end{itemize}
+\chapter{Rough notes}
+\section{General resources}
+\subsection{General Imaging and MRI Pipeline}
+Need to construct a general overview medical imaging, maybe going into slightly more detail about MRI scan pipeline. 
+\subsection{MS Lesion Segmentation Pipeline}
+For MS lesion segmentation pipeline, can use elpful overview from \href{https://pdf.sciencedirectassets.com/271303/1-s2.0-S0895611118X00081/1-s2.0-S0895611118303227/main.pdf}{Survey of automated multiple sclerosis lesion segmentation
+techniques on magnetic resonance imaging}
+\section{Isolated Concepts}
+\subsection{Random Forests}
+Need to understand what "Random forests require heirarchy" means and how this can be applied to images (what does it mean to extract heirarchy from an image)
+\subsection{Segmentation and Heirarchy}
+Explore Segmentation by Weighted Aggregation method. Explore how heirarchy is obtained from an image.
+\section{Scale Space / Smoothing}
+Scale space seems to be deeply connected to the smoothing of an image using a Gaussian Kernel. 
+\textbf{\textcolor{red}{Todo}}
+\begin{itemize}
+\item Explore and understand image scale space, along with the motivating idea behind segmentation. 
+\item Explore scale space segmentation \href{https://en.wikipedia.org/wiki/Scale-space_segmentation}{Wikipedia page}.
+\item Explore Segmentation by Weighted Aggregation method.
+\end{itemize}
+
+\section{Todo}
+Then reattempt to understand some of \href{https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=5238795}{Automatic Segmentation and Classification
+of Multiple Sclerosis in Multichannel MRI}. The main heuristic of this paper is to do MS lesion segmentation in MRI scans by training Random Forests at a multiscale level. Then explore the more advanced version of this: Spatially Adaptive Random Forests \href{https://ieeexplore.ieee.org/document/6556781}{Spatially Adaptive Random Forests
+}.
+
 \chapter{Question}
 \end{document}
