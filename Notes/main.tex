@@ -87,17 +87,37 @@ along with the weight matrix $W$ with entries
 w_{ij} & \text{if} \: \: (v_i, v_j) \in E \\
 0 & \text{else}
 \end{cases} \]
-Hence 
+Hence
 \[\Gamma(\mathbf{u}) = \frac{\mathbf{u}^TL\mathbf{u}}{\frac{1}{2}\mathbf{u}^TW\mathbf{u}}\]
+This saliency can then be used to find segments, since low values of this saliency function represent strongly coupled nodes. To determine low values of $\Gamma$ we let the entries of $\mathbf{u}$ take real values instead of binary values. 
+To minimise this, we use the Rayleigh quotient \cite{ghojogh_ca_karray_ca_crowley_ca_2022}. Define  
+\[R(\mathbf{x}, A) = \frac{\mathbf{x}^TA\mathbf{x}}{\mathbf{x}^T\mathbf{x}}\]
+Note that if we let 
+\[\mathbf{y} = \frac{\mathbf{x}}{||\mathbf{x}||_2}\]
+so that $||\mathbf{y}||_2^2 = 1$, then
+
+\[R(\mathbf{x}, A) = \frac{\frac{1}{||\mathbf{x}||_2^2}\mathbf{x}^TA\mathbf{x}}{\frac{1}{||\mathbf{x}||_2^2}\mathbf{x}^T\mathbf{x}} = R(\mathbf{y}, A) \]
+so when minimising this quantity over $\mathbf{x}$, we can add this constraint:
+\[\underset{\mathbf{x}}{\min} \: \: R(\mathbf{x}, A)
+\equiv \underset{\mathbf{x}: \: ||\mathbf{x}||_2^2 = 1}{\min} \: \: R(\mathbf{x}, A)
+\] then plugging in this constraint into $R$ to simplify the denominator gives the optimisation problem:
+\[\underset{\mathbf{x}: \: \mathbf{x}^T\mathbf{x}=1}{\min} \: \: \mathbf{x}^TA\mathbf{x}\]
+Then using the Lagrangian method of multipliers \cite{dodge_2008} we have Lagrangian:
+\[\mathcal{L} = \mathbf{x}^TA\mathbf{x} - \lambda(\mathbf{x}^T\mathbf{x} - 1) \implies \nabla_{\mathbf{x}} \mathcal{L} = 2A\mathbf{x} - 2 \lambda \mathbf{x}\]
+and so the minimisation problem is equivalent to the eigen-problem: 
+\[A\mathbf{x} = \lambda \mathbf{x}\] for the smallest eigenvalue $\lambda$ of A. Now consider the generalised Rayleigh quotient: 
+\[R_G(\mathbf{x}, A_G,B_G) = \frac{\mathbf{x}^TA_G\mathbf{x}}{\mathbf{x}^TB_G\mathbf{x}} = R(\frac{\mathbf{x}}{||\mathbf{x}||_2})\]
+Assuming $B$ is symmetric, positive-definite it has a unique Cholesky decomposition \cite{higham_2009} $B _G= LL^T$ where $L$ is an upper triangular matrix. So we can write: 
+\[R_G(\mathbf{x}, A_G,B_G) =  \frac{\mathbf{x}^TA_G\mathbf{x}}{(L^T\mathbf{x})^T(L^T\mathbf{x})}\]
+And so now we can use a substitution of $A_G = L^{-1}A(L^T)^{-1}$ then: 
+\[R_G(\mathbf{x}, A_G,B_G) = \frac{(L^T\mathbf{x})^TA(L^T\mathbf{x})}{(L^T\mathbf{x})^T(L^T\mathbf{x})} = R(L^T\mathbf{x}, L^{-1}A(L^T)^{-1})\]
+And so to minimise the generalised Rayleigh quotient we can use: 
+\[\underset{\mathbf{x}}{\min} \: R_G(\mathbf{x}, A_G, B_G) \equiv \underset{\mathbf{x}:\: \mathbf{x}^T\mathbf{x}=1}{\min} R_G(\mathbf{x}, A_G, B_G) \]
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.3\textwidth]{GraphCutExample}
 \caption{Example of a graph cut with high saliency.}
 \end{figure}
-
-
-To do this, a measure is defined that takes into account the contrast over the boundary of a segment, as well as the similarity of the 
-
 
 
 
