@@ -1,7 +1,7 @@
-from graph import Graph
+from graph import Graph, FinestGraph, Coarsener
 
 if __name__ == '__main__':
-    graph = Graph((1, 1, 2))
-    print(graph.adjacency)
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    finest_graph = FinestGraph((100, 100, 100), True)
+    print(finest_graph.adjacency)
+    coarse_graph = Coarsener(FinestGraph, finest=True)
+    print(len(coarse_graph.coarse_nodes))
