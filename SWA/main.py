@@ -1,7 +1,11 @@
-from graph import Graph, FinestGraph, Coarsener
+from graph import Graph, FinestGraphFactory, Coarsener
+import time
 
 if __name__ == '__main__':
-    finest_graph = FinestGraph((100, 100, 100), True)
-    print(finest_graph.adjacency)
-    coarse_graph = Coarsener(FinestGraph, finest=True)
-    print(len(coarse_graph.coarse_nodes))
+    start_time = time.time()
+
+    finest_graph_factor = FinestGraphFactory((25, 25, 10), True)
+    finest_graph = finest_graph_factor.build()
+
+    coarse_graph = Coarsener(finest_graph, finest=True)
+    print("--- %s seconds ---" % (time.time() - start_time))
