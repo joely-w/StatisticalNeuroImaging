@@ -112,7 +112,7 @@ class Coarsener:
     beta: float
     finest: bool
 
-    def __init__(self, fine_graph: Graph, beta=0.3, finest=False):
+    def __init__(self, fine_graph: Graph, beta=0.2, finest=False):
         """
 
         :param fine_graph: Graph to coarsen.
@@ -125,6 +125,24 @@ class Coarsener:
 
         self.coarse_nodes = set()
         self.generate_seeds()
+
+    def calc_interpolation_weight(self, node_1, node_2) -> float:
+        """
+        Calculate interpolation weight between fine node_1 and coarse node_2.
+        :param node_1:
+        :param node_2:
+        :return:
+        """
+        numerator = self.fine_graph.get_adjacency(node_1, node_2)
+        if numerator == 0:
+            return 0
+        neighbours = self.fine_graph.adjacency[node_1]
+        denominator = 0
+        for neighbour in neighbours:
+            if neighbour in self.coarse_nodes:
+                denominator += self.fine_graph.adjacency[node_1][neighbour]
+
+        return numerator / denominator
 
     def validate_add_block(self, node: int) -> bool:
         """
@@ -139,6 +157,10 @@ class Coarsener:
                 max_coarse = self.fine_graph.adjacency[node][neighbour]
         return max_coarse < self.beta * sum(neighbours.values())
     def generate_seeds(self):
+        """
+        Performs coarse node selection from fine nodes.
+        :return:
+        """
         # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
         if not self.finest:
             self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
