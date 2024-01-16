@@ -3,28 +3,53 @@ Graph implementation used for SWA algorithm.
 TODO: Cythonize to speed up.
 """
 from typing import Tuple, Set, List, Dict
-import numpy as np
 from image import affinity
-from scipy.sparse import csr_matrix
 
 
 class Graph:
     """
     Generic interface for a graph. Will be used to graphs at all scales.
     """
-    nodes: Set = set()
-    volumes: List = []
-    adjacency: np.ndarray
+    nodes: List = []
+    volumes: Dict = {}
+    adjacency: Dict[int:Dict] = {}
     mock: bool
 
-    def __init__(self, adjacency = None, nodes=None, volumes = None, mock=True):
-        self.nodes = set() if nodes is None else nodes
-        self.volumes = [] if volumes is None else volumes
-
+    def __init__(self, adjacency = None, volumes = None, nodes=None, mock=True):
+        self.volumes = {} if volumes is None else volumes
+        self.nodes = [] if nodes is None else nodes
         if adjacency is not None:
             self.adjacency = adjacency
 
         self.mock = mock
+    def get_adjacency(self, i: int, j: int) -> int:
+        """
+        Handles fetching in a matrix like way for adjacency dictionary.
+        :param i: Node with label i
+        :param j: Node with label j
+        :return: Coupling value a_{ij} = a_{ji}
+        """
+        if i in self.adjacency:
+            if j in self.adjacency[i]:
+                return self.adjacency[i][j]
+        return 0
+    def set_adjacency(self, i: int, j: int, value: any) -> None:
+        """
+        Sets coupling value a_{ij}.
+        Populates both a_{ij} and a_{ji} for improved time complexity when searching for edges.
+        :param i:
+        :param j:
+        :param value: Value to set coupling value to.
+        :return:
+        """
+        if i in self.adjacency:
+            self.adjacency[i][j] = value
+        else:
+            self.adjacency[i] = {j: value}
+        if j in self.adjacency:
+            self.adjacency[j][i] = value
+        else:
+            self.adjacency[j] = {i: value}
 
 
 class FinestGraphFactory(Graph):
@@ -39,16 +64,14 @@ class FinestGraphFactory(Graph):
         Create 6-connected graph with initial dimensions dim = (x,y,z).
         """
         super().__init__(mock=mock)
-        matrix_dim = dim[0] * dim[1] * dim[2]
-        self.adjacency = np.zeros((matrix_dim, matrix_dim), dtype=float)
-
+        self.dim = dim
         index = 0
         for x in range(dim[0]):
             for y in range(dim[1]):
                 for z in range(dim[2]):
                     self.node_coordinates.append((x, y, z))
-                    self.nodes.add(index)
-                    self.volumes.append(1)
+                    self.nodes.append(index)
+                    self.volumes[index] = 1
                     self.coord_labels[(x, y, z)] = index
                     self.populate_edge_weights(index)
                     index += 1
@@ -57,7 +80,6 @@ class FinestGraphFactory(Graph):
         """
         Populate edge weights of a node.
         Traverses using the fact that adjacent nodes are identical in 2 coordinates and different in 1.
-        TODO: This is not true for diagonals, add diagonals as well!
         :return:
         """
         for i in range(3):
@@ -65,12 +87,16 @@ class FinestGraphFactory(Graph):
 
             point_copy[i] += 1
             if tuple(point_copy) in self.coord_labels:
-                self.adjacency[node, self.coord_labels[tuple(point_copy)]] = affinity(self.node_coordinates[node],
-                                                                                      tuple(point_copy), mock=self.mock)
+                self.set_adjacency(node, self.coord_labels[tuple(point_copy)],
+                                   affinity(self.node_coordinates[node],
+                                            tuple(point_copy),
+                                            mock=self.mock))
             point_copy[i] -= 2
             if tuple(point_copy) in self.coord_labels:
-                self.adjacency[node, self.coord_labels[tuple(point_copy)]] = affinity(self.node_coordinates[node],
-                                                                                      tuple(point_copy), mock=self.mock)
+                self.set_adjacency(node, self.coord_labels[tuple(point_copy)],
+                                   affinity(self.node_coordinates[node],
+                                            tuple(point_copy),
+                                            mock=self.mock))
     def build(self) -> Graph:
         """
         Build generic graph class with contents of finest graph.
@@ -95,44 +121,29 @@ class Coarsener:
         self.beta = beta
         self.fine_graph = fine_graph
         self.finest = finest
+        self.fine_nodes = fine_graph.nodes
 
         self.coarse_nodes = set()
-        self.fine_nodes = list(self.fine_graph.nodes)
         self.generate_seeds()
 
-    def is_balanced(self):
+    def validate_add_block(self, node: int) -> bool:
         """
-        Checks if sum of weights meets balancing condition.
-        This works on the inductive assumption that the graph was balanced before adding the last node to F,
-        and so this is the only node that needs to be checked.
-        :return:
+        Determines if a fine node should be moved to coarse nodes.
+        :param node: Fine node to check.
+        :return bool: True if node should be moved to coarse nodes, otherwise False.
         """
-        node = self.fine_nodes[-1]
-        all_children_weights = 0
-        c_children_weights = 0
-        for child, weight in enumerate(self.fine_graph.adjacency[node]):
-            all_children_weights += self.fine_graph.adjacency[node][child]
-            if child in self.coarse_nodes:
-                c_children_weights += self.fine_graph.adjacency[node][child]
-
-        # If condition already broken, return early
-        return c_children_weights >= self.beta * all_children_weights
-
+        neighbours = self.fine_graph.adjacency[node]
+        max_coarse = 0
+        for neighbour in neighbours:
+            if neighbour in self.coarse_nodes and self.fine_graph.adjacency[node][neighbour] > max_coarse:
+                max_coarse = self.fine_graph.adjacency[node][neighbour]
+        return max_coarse < self.beta * sum(neighbours.values())
     def generate_seeds(self):
-        """
-        Move nodes from fine to coarse sequentially until weighting is no longer balanced.
-        Fine node is a list so that we can re-order it to match whatever sequential pattern we want.
-        :param finest: If true, fine nodes will be ordered to every other node first. If false then fine nodes will
-        be sorted by node volume.
-        :return:
-        """
-
-        if self.finest:
-            self.fine_nodes = self.fine_nodes[::2] + self.fine_nodes[1::2]
-        else:
+        # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
+        if not self.finest:
             self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
 
-        while len(self.fine_nodes) != 0 and not self.is_balanced():
-            # Move from fine to coarse
-            self.coarse_nodes.add(self.fine_nodes[0])
-            self.fine_nodes.pop(0)
+        self.coarse_nodes.add(self.fine_nodes[0])
+        for i in self.fine_nodes:
+            if self.validate_add_block(i):
+                self.coarse_nodes.add(i)

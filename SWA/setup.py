@@ -5,3 +5,4 @@ setup(
     name='Hello world app',
     ext_modules=cythonize("graph.pyx"),
 )
+# Command to run to compile: python setup.py build_ext --inplace

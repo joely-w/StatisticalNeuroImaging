@@ -11,7 +11,8 @@ def affinity(a, b, mock=False) -> float:
     :param mock: If no image is loaded, set mock=True to continue with random numbers.
     :return float:
     """
-    return np.exp(-abs(intensity(a, mock) - intensity(b, mock)))
+    alpha = 15
+    return np.exp(-alpha*abs(intensity(a, mock) - intensity(b, mock)))
 
 
 def intensity(coord: Tuple[int, int, int], mock=False):
