@@ -2,6 +2,11 @@ from typing import Tuple
 from random import randint
 import numpy as np
 
+from PIL import Image
+
+img = Image.open('mri_example.jpg').convert('L')
+px = img.load()
+
 
 def affinity(a, b, mock=False) -> float:
     """
@@ -11,8 +16,8 @@ def affinity(a, b, mock=False) -> float:
     :param mock: If no image is loaded, set mock=True to continue with random numbers.
     :return float:
     """
-    alpha = 15
-    return np.exp(-alpha*abs(intensity(a, mock) - intensity(b, mock)))
+    alpha = 1
+    return np.exp(-alpha * abs(intensity(a, mock) - intensity(b, mock)))
 
 
 def intensity(coord: Tuple[int, int, int], mock=False):
@@ -24,7 +29,7 @@ def intensity(coord: Tuple[int, int, int], mock=False):
     :return int:
     """
     if mock:
-        return randint(1, 100)
+        return int(round(0.7 * randint(1, 20) + 0.3 * randint(20, 255), 0))
     else:
         # TODO implement intensity fetching once 3D image loading has been implemented.
-        return
+        return img.getpixel((coord[0], coord[1]))
