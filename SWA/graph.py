@@ -11,18 +11,17 @@ class Graph:
     """
     Generic interface for a graph. Will be used to graphs at all scales.
     """
-    nodes: List = []
-    volumes: Dict = {}
-    adjacency: Mapping[int, Mapping[int, float]] = {}
-    mock: bool
+    nodes: List
+    volumes: Dict
+    edges_count: int = 0
+    saliencies: Dict
+    adjacency: Mapping[int, Mapping[int, float]]
 
-    def __init__(self, adjacency=None, volumes=None, nodes=None, mock=True):
+    def __init__(self, adjacency=None, volumes=None, nodes=None, saliencies=None):
         self.volumes = {} if volumes is None else volumes
         self.nodes = [] if nodes is None else nodes
-        if adjacency is not None:
-            self.adjacency = copy.deepcopy(adjacency)
-
-        self.mock = mock
+        self.saliencies = {} if saliencies is None else saliencies
+        self.adjacency = {} if adjacency is None else copy.deepcopy(adjacency)
 
     def get_adjacency(self, i: int, j: int) -> float:
         """
@@ -36,15 +35,27 @@ class Graph:
                 return self.adjacency[i][j]
         return 0
 
+    def get_neighbours(self, i) -> List[int]:
+        """
+        Gets all neighbours of node i.
+        Will return empty list if node i is not in adjacency dict.
+        :param i:
+        :return:
+        """
+        if i in self.adjacency:
+            return list(self.adjacency[i].keys())
+        return []
+
     def set_adjacency(self, i: int, j: int, value: float) -> None:
         """
         Sets coupling value a_{ij}.
-        Populates both a_{ij} and a_{ji} for improved time complexity when searching for edges.
+        Populates both a_{ij} and a_{ji} for efficiency when searching for edges.
         :param i:
         :param j:
         :param value: Value to set coupling value to.
         :return:
         """
+        self.edges_count += 1
         if i in self.adjacency:
             self.adjacency[i][j] = value
         else:
@@ -63,11 +74,11 @@ class FinestGraphFactory(Graph):
     node_coordinates: List = []
     coord_labels: Dict = {}
 
-    def __init__(self, dim, mock=True):
+    def __init__(self, dim):
         """
         Create 6-connected graph with initial dimensions dim = (x,y,z).
         """
-        super().__init__(mock=mock)
+        super().__init__()
         self.dim = dim
         index = 0
         for x in range(dim[0]):
@@ -93,38 +104,38 @@ class FinestGraphFactory(Graph):
             if tuple(point_copy) in self.coord_labels:
                 self.set_adjacency(node, self.coord_labels[tuple(point_copy)],
                                    affinity(self.node_coordinates[node],
-                                            tuple(point_copy),
-                                            mock=self.mock))
+                                            tuple(point_copy)))
             point_copy[i] -= 2
             if tuple(point_copy) in self.coord_labels:
                 self.set_adjacency(node, self.coord_labels[tuple(point_copy)],
                                    affinity(self.node_coordinates[node],
-                                            tuple(point_copy),
-                                            mock=self.mock))
+                                            tuple(point_copy)))
 
     def build(self) -> Graph:
         """
         Build generic graph class with contents of finest graph.
         :return:
         """
-        return Graph(adjacency=self.adjacency, volumes=self.volumes, nodes=self.nodes, mock=self.mock)
+        return Graph(adjacency=self.adjacency, volumes=self.volumes, nodes=self.nodes)
 
 
 class Coarsener:
     """
     Class of functions which carry out graph coarsening.
     Fine graph in, coarse graph out implementation.
-    TODO: Calculate volume of each new block.
     """
+    beta: float
+    scale: int
     fine_graph: Graph
+    fine_nodes: List
     coarse_nodes: Set
+    parity = set()
     coarse_adjacency: Mapping[int, Mapping[int, float]] = {}
     coarse_volumes: Dict = {}
-    fine_nodes: List
-    beta: float
-    finest: bool
+    coarse_saliencies: Dict = {}
+    count = 0
 
-    def __init__(self, fine_graph: Graph, beta=0.2, finest=False):
+    def __init__(self, fine_graph: Graph, scale, beta=0.4):
         """
 
         :param fine_graph: Graph to coarsen.
@@ -132,9 +143,10 @@ class Coarsener:
         """
         self.beta = beta
         self.fine_graph = fine_graph
-        self.finest = finest
+        self.scale = scale
         self.fine_nodes = fine_graph.nodes
         self.coarse_nodes = set()
+        self.scale = scale
 
     def calc_interpolation_weight(self, node_1, node_2) -> float:
         """
@@ -146,11 +158,10 @@ class Coarsener:
         numerator = self.fine_graph.get_adjacency(node_1, node_2)
         if numerator == 0:
             return 0
-        neighbours = self.fine_graph.adjacency[node_1]
         denominator = 0
-        for neighbour in neighbours:
+        for neighbour in self.fine_graph.get_neighbours(node_1):
             if neighbour in self.coarse_nodes:
-                denominator += self.fine_graph.adjacency[node_1][neighbour]
+                denominator += self.fine_graph.get_adjacency(node_1, neighbour)
 
         return numerator / denominator
 
@@ -160,12 +171,12 @@ class Coarsener:
         :param node: Fine node to check.
         :return bool: True if node should be moved to coarse nodes, otherwise False.
         """
-        neighbours = self.fine_graph.adjacency[node]
+        neighbours = self.fine_graph.get_neighbours(node)
         max_coarse = 0
         for neighbour in neighbours:
-            if neighbour in self.coarse_nodes and self.fine_graph.adjacency[node][neighbour] > max_coarse:
-                max_coarse = self.fine_graph.adjacency[node][neighbour]
-        return max_coarse < self.beta * sum(neighbours.values())
+            if neighbour in self.coarse_nodes and self.fine_graph.get_adjacency(node, neighbour) > max_coarse:
+                max_coarse = self.fine_graph.get_adjacency(node, neighbour)
+        return max_coarse < self.beta * sum(neighbours)
 
     def calculate_coarse_volume(self, node) -> float:
         """
@@ -173,10 +184,10 @@ class Coarsener:
         :param node:
         :return float: Volume of node
         """
-        neighbours = self.fine_graph.adjacency[node]
+        neighbours = self.fine_graph.get_neighbours(node)
         volume = 0
         for neighbour in neighbours:
-            volume += self.fine_graph.volumes[neighbour] * self.fine_graph.adjacency[node][neighbour]
+            volume += self.fine_graph.volumes[neighbour] * self.fine_graph.get_adjacency(node, neighbour)
         return volume
 
     def generate_seeds(self):
@@ -186,7 +197,7 @@ class Coarsener:
         :return:
         """
         # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
-        if not self.finest:
+        if not self.scale == 1:
             self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
 
         self.coarse_nodes.add(self.fine_nodes[0])
@@ -209,6 +220,8 @@ class Coarsener:
             else:
                 self.coarse_adjacency[i][j] = value
         else:
+            self.count += 1
+            print(f"{self.count} edges")
             self.coarse_adjacency[i] = {j: value}
 
         if j in self.coarse_adjacency:
@@ -217,6 +230,8 @@ class Coarsener:
             else:
                 self.coarse_adjacency[j][i] = value
         else:
+            self.count += 1
+            print(f"{self.count} edges")
             self.coarse_adjacency[j] = {i: value}
 
     def generate_coarse_couplings(self):
@@ -237,11 +252,33 @@ class Coarsener:
                                 q] * self.calc_interpolation_weight(q, l)
                             self.increment_coarse_adjacency(k, l, contribution)
 
+    def calculate_saliencies(self):
+        """
+        Calculates the saliency of each block in coarse graph.
+        Requires couplings and nodes first.
+        TODO: Determine what to do if a node has no couplings.
+        :return:
+        """
+        for node in self.coarse_nodes:
+            if node in self.coarse_adjacency:
+                neighbours = self.coarse_adjacency[node]
+                coupling_sum = 0
+                for neighbour in neighbours:
+                    coupling_sum += neighbours[neighbour]
+                self.coarse_saliencies[node] = coupling_sum * 2 ** self.scale / self.coarse_volumes[node]
+
     def build(self) -> Graph:
         """
         Builds coarse graph.
         :return Graph: Coarsened graph.
         """
+        print("Generating Coarse Seeds")
         self.generate_seeds()
+        print("Generating Coarse Couplings")
         self.generate_coarse_couplings()
-        return Graph(adjacency=self.coarse_adjacency, nodes=list(self.coarse_nodes), volumes=self.coarse_volumes)
+        print("Calculating Saliencies")
+        self.calculate_saliencies()
+        return Graph(adjacency=self.coarse_adjacency,
+                     nodes=list(self.coarse_nodes),
+                     volumes=self.coarse_volumes,
+                     saliencies=self.coarse_saliencies)
