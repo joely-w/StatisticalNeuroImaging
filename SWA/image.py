@@ -4,7 +4,7 @@ import numpy as np
 
 from PIL import Image
 
-img = Image.open('mri_example.jpg').convert('L')
+img = Image.open('elephant.jpg').convert('L')
 px = img.load()
 
 

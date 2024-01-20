@@ -2,6 +2,7 @@
 Graph implementation used for SWA algorithm.
 TODO: Cythonize to speed up.
 """
+import time
 from typing import Tuple, Set, List, Dict, Mapping
 from image import affinity
 import copy
@@ -134,6 +135,7 @@ class Coarsener:
     coarse_volumes: Dict = {}
     coarse_saliencies: Dict = {}
     count = 0
+    max_edges = 0
 
     def __init__(self, fine_graph: Graph, scale, beta=0.4):
         """
@@ -214,25 +216,19 @@ class Coarsener:
         :param value:
         :return:
         """
-        if i in self.coarse_adjacency:
-            if j in self.coarse_adjacency[i]:
-                self.coarse_adjacency[i][j] += value
-            else:
-                self.coarse_adjacency[i][j] = value
-        else:
-            self.count += 1
-            print(f"{self.count} edges")
-            self.coarse_adjacency[i] = {j: value}
 
-        if j in self.coarse_adjacency:
-            if i in self.coarse_adjacency[j]:
-                self.coarse_adjacency[j][i] += value
+        def increment(a, b, val):
+            if a in self.coarse_adjacency:
+                if b in self.coarse_adjacency[a]:
+                    self.coarse_adjacency[a][b] += val
+                else:
+                    self.coarse_adjacency[a][b] = val
             else:
-                self.coarse_adjacency[j][i] = value
-        else:
-            self.count += 1
-            print(f"{self.count} edges")
-            self.coarse_adjacency[j] = {i: value}
+                self.count += 1
+                self.coarse_adjacency[a] = {b: val}
+
+        increment(i, j, value)
+        increment(j, i, value)
 
     def generate_coarse_couplings(self):
         """
@@ -240,7 +236,10 @@ class Coarsener:
         :return:
         """
         # Each loop except first is O(1) as there is at most 6 neighbours.
+        num = 0
         for k in self.coarse_nodes:
+            num += 1
+            print(f"\r Couplings considered {num/len(self.coarse_nodes)}% with max edges {self.max_edges}", end='')
             k_neighbours = self.fine_graph.adjacency[k]
             for p in k_neighbours:
                 p_neighbours = self.fine_graph.adjacency[p]
@@ -251,6 +250,8 @@ class Coarsener:
                             contribution = self.calc_interpolation_weight(p, k) * self.fine_graph.adjacency[p][
                                 q] * self.calc_interpolation_weight(q, l)
                             self.increment_coarse_adjacency(k, l, contribution)
+                            self.max_edges = max(self.max_edges, len(k_neighbours))
+
 
     def calculate_saliencies(self):
         """
@@ -272,12 +273,17 @@ class Coarsener:
         Builds coarse graph.
         :return Graph: Coarsened graph.
         """
+        start_time = time.time()
         print("Generating Coarse Seeds")
         self.generate_seeds()
+        print("--- %s seconds ---" % (time.time() - start_time))
         print("Generating Coarse Couplings")
         self.generate_coarse_couplings()
+        print("--- %s seconds ---" % (time.time() - start_time))
+
         print("Calculating Saliencies")
         self.calculate_saliencies()
+        print("--- %s seconds ---" % (time.time() - start_time))
         return Graph(adjacency=self.coarse_adjacency,
                      nodes=list(self.coarse_nodes),
                      volumes=self.coarse_volumes,
