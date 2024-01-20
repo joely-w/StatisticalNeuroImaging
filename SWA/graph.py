@@ -120,6 +120,36 @@ class FinestGraphFactory(Graph):
         return Graph(adjacency=self.adjacency, volumes=self.volumes, nodes=self.nodes)
 
 
+def memoize(dict_pointer, key_1, key_2, value):
+    # Memoize
+    if key_1 in dict_pointer:
+        dict_pointer[key_1][key_2] = value
+    else:
+        dict_pointer[key_1] = {key_2: value}
+
+    if key_2 in dict_pointer:
+        dict_pointer[key_2][key_1] = value
+    else:
+        dict_pointer[key_2] = {key_1: value}
+
+
+def is_memoized(dict_pointer, key_1, key_2):
+    """
+    Memoizes generically.
+    :param dict_pointer:
+    :param key_1:
+    :param key_2:
+    :param value:
+    :return:
+    """
+    # Memo check
+    if key_1 in dict_pointer and key_2 in dict_pointer[key_1]:
+        return dict_pointer[key_1][key_2]
+    if key_2 in dict_pointer and key_1 in dict_pointer[key_2]:
+        return dict_pointer[key_2][key_1]
+    return False
+
+
 class Coarsener:
     """
     Class of functions which carry out graph coarsening.
@@ -137,7 +167,7 @@ class Coarsener:
     count = 0
     max_edges = 0
 
-    def __init__(self, fine_graph: Graph, scale, beta=0.4):
+    def __init__(self, fine_graph: Graph, scale, beta=0.1):
         """
 
         :param fine_graph: Graph to coarsen.
@@ -149,6 +179,7 @@ class Coarsener:
         self.fine_nodes = fine_graph.nodes
         self.coarse_nodes = set()
         self.scale = scale
+        self.interpolation_weights: Dict = {}
 
     def calc_interpolation_weight(self, node_1, node_2) -> float:
         """
@@ -157,6 +188,10 @@ class Coarsener:
         :param node_2:
         :return:
         """
+        memo = is_memoized(self.interpolation_weights, node_1, node_2)
+        if memo:
+            return memo
+
         numerator = self.fine_graph.get_adjacency(node_1, node_2)
         if numerator == 0:
             return 0
@@ -165,7 +200,9 @@ class Coarsener:
             if neighbour in self.coarse_nodes:
                 denominator += self.fine_graph.get_adjacency(node_1, neighbour)
 
-        return numerator / denominator
+        value = numerator / denominator
+        memoize(self.interpolation_weights, node_1, node_2, value)
+        return value
 
     def validate_add_block(self, node: int) -> bool:
         """
@@ -201,7 +238,8 @@ class Coarsener:
         # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
         if not self.scale == 1:
             self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
-
+        else:
+            self.fine_nodes = self.fine_nodes[::2] + self.fine_nodes[1::2]
         self.coarse_nodes.add(self.fine_nodes[0])
         for i in self.fine_nodes:
             if self.validate_add_block(i):
@@ -239,7 +277,8 @@ class Coarsener:
         num = 0
         for k in self.coarse_nodes:
             num += 1
-            print(f"\r Couplings considered {num/len(self.coarse_nodes)}% with max edges {self.max_edges}", end='')
+            print(f"\r Couplings considered {100 * num / len(self.coarse_nodes)}% with max edges {self.max_edges}",
+                  end='')
             k_neighbours = self.fine_graph.adjacency[k]
             for p in k_neighbours:
                 p_neighbours = self.fine_graph.adjacency[p]
@@ -251,7 +290,6 @@ class Coarsener:
                                 q] * self.calc_interpolation_weight(q, l)
                             self.increment_coarse_adjacency(k, l, contribution)
                             self.max_edges = max(self.max_edges, len(k_neighbours))
-
 
     def calculate_saliencies(self):
         """
@@ -279,7 +317,7 @@ class Coarsener:
         print("--- %s seconds ---" % (time.time() - start_time))
         print("Generating Coarse Couplings")
         self.generate_coarse_couplings()
-        print("--- %s seconds ---" % (time.time() - start_time))
+        print("\n --- %s seconds ---" % (time.time() - start_time))
 
         print("Calculating Saliencies")
         self.calculate_saliencies()

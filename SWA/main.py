@@ -4,7 +4,7 @@ import time
 if __name__ == '__main__':
     start_time = time.time()
 
-    finest_graph_factor = FinestGraphFactory((481, 321, 1))
+    finest_graph_factor = FinestGraphFactory((10, 10, 1))
     finest_graph = finest_graph_factor.build()
     pyramid = [finest_graph]
     print(f"Finest graph constructed with {len(finest_graph.nodes)} nodes.")
