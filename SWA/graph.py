@@ -6,6 +6,8 @@ import time
 from typing import Tuple, Set, List, Dict, Mapping
 from image import affinity
 import copy
+import numpy as np
+from scipy.sparse import dok_array
 
 
 class Graph:
@@ -17,10 +19,12 @@ class Graph:
     edges_count: int = 0
     saliencies: Dict
     adjacency: Mapping[int, Mapping[int, float]]
+    adjacency_matrix: any
 
     def __init__(self, adjacency=None, volumes=None, nodes=None, saliencies=None):
         self.volumes = {} if volumes is None else volumes
         self.nodes = [] if nodes is None else nodes
+        self.adjacency_matrix = dok_array(shape=(len(nodes), len(nodes)), dtype=np.float32)
         self.saliencies = {} if saliencies is None else saliencies
         self.adjacency = {} if adjacency is None else copy.deepcopy(adjacency)
 
@@ -57,6 +61,9 @@ class Graph:
         :return:
         """
         self.edges_count += 1
+        self.adjacency_matrix[i, j] = value
+        self.adjacency_matrix[j, i] = value
+
         if i in self.adjacency:
             self.adjacency[i][j] = value
         else:
@@ -167,7 +174,7 @@ class Coarsener:
     count = 0
     max_edges = 0
 
-    def __init__(self, fine_graph: Graph, scale, beta=0.1):
+    def __init__(self, fine_graph: Graph, scale, beta=0.2):
         """
 
         :param fine_graph: Graph to coarsen.
@@ -188,20 +195,25 @@ class Coarsener:
         :param node_2:
         :return:
         """
-        memo = is_memoized(self.interpolation_weights, node_1, node_2)
-        if memo:
-            return memo
-
         numerator = self.fine_graph.get_adjacency(node_1, node_2)
+
+        # if node_1 is coarse not fine (not sure if this is
+        # technically the right definition) or if node_2 is not coarse.
+        if node_2 not in self.coarse_nodes:
+            return 0
+
+        if node_1 == node_2:
+            return 1
+
         if numerator == 0:
             return 0
+
         denominator = 0
         for neighbour in self.fine_graph.get_neighbours(node_1):
             if neighbour in self.coarse_nodes:
                 denominator += self.fine_graph.get_adjacency(node_1, neighbour)
 
         value = numerator / denominator
-        memoize(self.interpolation_weights, node_1, node_2, value)
         return value
 
     def validate_add_block(self, node: int) -> bool:
@@ -212,10 +224,13 @@ class Coarsener:
         """
         neighbours = self.fine_graph.get_neighbours(node)
         max_coarse = 0
+        neighbour_sum = 0
         for neighbour in neighbours:
-            if neighbour in self.coarse_nodes and self.fine_graph.get_adjacency(node, neighbour) > max_coarse:
-                max_coarse = self.fine_graph.get_adjacency(node, neighbour)
-        return max_coarse < self.beta * sum(neighbours)
+            neighbour_val = self.fine_graph.get_adjacency(node, neighbour)
+            neighbour_sum += neighbour_val
+            if neighbour in self.coarse_nodes and neighbour_val > max_coarse:
+                max_coarse = neighbour_val
+        return max_coarse < self.beta * neighbour_sum
 
     def calculate_coarse_volume(self, node) -> float:
         """
@@ -237,11 +252,11 @@ class Coarsener:
         """
         # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
         if not self.scale == 1:
-            self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
+            fine_node_seq = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
         else:
-            self.fine_nodes = self.fine_nodes[::2] + self.fine_nodes[1::2]
+            fine_node_seq = self.fine_nodes[::2] + self.fine_nodes[1::2]
         self.coarse_nodes.add(self.fine_nodes[0])
-        for i in self.fine_nodes:
+        for i in fine_node_seq:
             if self.validate_add_block(i):
                 self.coarse_nodes.add(i)
                 self.coarse_volumes[i] = self.calculate_coarse_volume(i)
@@ -254,6 +269,8 @@ class Coarsener:
         :param value:
         :return:
         """
+        if value < 0.0005:
+            return
 
         def increment(a, b, val):
             if a in self.coarse_adjacency:
@@ -279,15 +296,18 @@ class Coarsener:
             num += 1
             print(f"\r Couplings considered {100 * num / len(self.coarse_nodes)}% with max edges {self.max_edges}",
                   end='')
-            k_neighbours = self.fine_graph.adjacency[k]
+            k_neighbours = self.fine_graph.get_neighbours(k)
             for p in k_neighbours:
-                p_neighbours = self.fine_graph.adjacency[p]
+                p_neighbours = self.fine_graph.get_neighbours(p)
                 for q in p_neighbours:
-                    q_neighbours = self.fine_graph.adjacency[q]
+                    if q == k:
+                        continue
+                    q_neighbours = self.fine_graph.get_neighbours(q)
                     for l in q_neighbours:
-                        if l in self.coarse_nodes:
+                        if l in self.coarse_nodes and l != p:
                             contribution = self.calc_interpolation_weight(p, k) * self.fine_graph.adjacency[p][
                                 q] * self.calc_interpolation_weight(q, l)
+
                             self.increment_coarse_adjacency(k, l, contribution)
                             self.max_edges = max(self.max_edges, len(k_neighbours))
 
