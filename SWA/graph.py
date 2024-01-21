@@ -269,9 +269,6 @@ class Coarsener:
         :param value:
         :return:
         """
-        if value < 0.0005:
-            return
-
         def increment(a, b, val):
             if a in self.coarse_adjacency:
                 if b in self.coarse_adjacency[a]:
