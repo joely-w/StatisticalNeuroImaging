@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import copy
 import time
 from typing import List, Dict, Tuple, Set
 
@@ -19,15 +22,15 @@ class MatrixGraph:
     saliencies: Dict
 
     def __init__(self, nodes=None, adjacency_matrix=None, volumes=None, saliencies=None, dim=None):
-        self.volumes = {} if volumes is None else volumes
+        self.volumes = {} if volumes is None else copy.deepcopy(volumes)
 
-        self.nodes = [] if nodes is None else nodes
+        self.nodes = [] if nodes is None else copy.deepcopy(nodes)
 
         self.adjacency_matrix = dok_array((dim, dim),
                                           dtype=np.float32) if adjacency_matrix is None \
-            else csc_matrix(adjacency_matrix, copy=True)
+            else csc_matrix(adjacency_matrix, copy=False)
 
-        self.saliencies = {} if saliencies is None else saliencies
+        self.saliencies = {} if saliencies is None else copy.deepcopy(saliencies)
 
     def set_adjacency(self, i: int, j: int, value: float) -> None:
         """
@@ -113,17 +116,24 @@ class MatrixGraphCoarsener:
     fine_graph: MatrixGraph
     fine_nodes: List
 
-    coarse_nodes: Set = set()
-    coarse_volumes: Dict = {}
-    interpolation_matrix = None
+    coarse_nodes: Set
+    coarse_volumes: Dict
+    coarse_weights: csr_matrix
+    coarse_saliencies: Dict
+    interpolation_matrix: any
+    fine_to_coarse: Dict
     scale: int
 
-    beta = 0.3
+    beta = 0.1
 
     def __init__(self, fine_graph: MatrixGraph, scale: int) -> None:
         self.fine_graph = fine_graph
         self.fine_nodes = fine_graph.nodes
         self.scale = scale
+        self.coarse_nodes = set()
+        self.coarse_volumes = {}
+        self.coarse_saliencies = {}
+        self.fine_to_coarse = {}
 
     def validate_add_block(self, node: int) -> bool:
         """
@@ -189,38 +199,63 @@ class MatrixGraphCoarsener:
         """
         # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
         if not self.scale == 1:
-            fine_node_seq = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
+            self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
         else:
-            fine_node_seq = self.fine_nodes[::2] + self.fine_nodes[1::2]
+            self.fine_nodes = self.fine_nodes[::2] + self.fine_nodes[1::2]
+        print("Selecting coarse seeds.")
         self.coarse_nodes.add(self.fine_nodes[0])
-        for index, node in enumerate(fine_node_seq):
-            print(f"\r Considered {100 * index / len(self.fine_nodes)}% of nodes.", end='')
+        coarse_index = 0
+        for node in self.fine_nodes:
+            print(f"\r Considered {round(100 * node / len(self.fine_nodes), 2)}% of nodes", end='')
             if self.validate_add_block(node):
                 self.coarse_nodes.add(node)
-                self.coarse_volumes[node] = self.calculate_coarse_volume(node)
+                self.fine_to_coarse[node] = coarse_index
+                self.coarse_volumes[coarse_index] = self.calculate_coarse_volume(node)
+                coarse_index += 1
 
-    def create_interpolation_matrix(self):
-        self.interpolation_matrix = dok_array((len(self.coarse_nodes), len(self.fine_nodes)), dtype=np.float32)
-        for i in self.fine_nodes:
-            print(f'\r {i / len(self.fine_nodes) * 100}% fine nodes interpolated', end='')
-
-            if i in self.coarse_nodes:
-                self.interpolation_matrix[i, i] = 1
+    def create_coarse_couplings(self):
+        print("\n Interpolating fine nodes.")
+        self.interpolation_matrix = dok_array((len(self.fine_nodes), len(self.coarse_nodes)), dtype=np.float32)
+        for index, i in enumerate(self.fine_nodes):
+            print(f'\r {round(index / len(self.fine_nodes) * 100, 3)}% fine nodes interpolated', end='')
             neighbours = self.fine_graph.get_neighbours(i)
+            if i in self.coarse_nodes:
+                self.interpolation_matrix[self.fine_to_coarse[i], self.fine_to_coarse[i]] = 1
+
             for j in neighbours:
                 if j in self.coarse_nodes:
-                    self.interpolation_matrix[i, j] = self.calc_interpolation_weight(i, j)
+                    self.interpolation_matrix[i, self.fine_to_coarse[j]] = self.calc_interpolation_weight(i, j)
+        print("\n Creating coarse adjacency matrix.")
+        self.coarse_weights = self.interpolation_matrix.transpose() @ self.fine_graph.adjacency_matrix @ self.interpolation_matrix
+
+    def calculate_saliencies(self):
+        print("Calculating coarse saliencies.")
+        for i in self.coarse_nodes:
+            node = self.fine_to_coarse[i]
+            print(f'\r {round(node / len(self.coarse_nodes) * 100, 3)}% coarse saliencies calculated', end='')
+            neighbours = self.coarse_weights[:, [node]].nonzero()[0]
+            coupling_sum = 0
+            for neighbour_weight in neighbours:
+                coupling_sum += neighbour_weight
+            self.coarse_saliencies[node] = coupling_sum * 2 ** self.scale / self.coarse_volumes[node]
 
     def build(self):
         self.generate_seeds()
-        self.create_interpolation_matrix()
+        self.create_coarse_couplings()
+        self.calculate_saliencies()
+        print("\n")
+        return MatrixGraph(nodes=list(self.fine_to_coarse.values()), adjacency_matrix=self.coarse_weights,
+                           volumes=self.coarse_volumes, saliencies=self.coarse_saliencies, )
 
 
 start_time = time.time()
 
-fine_graph_factory = FineMatrixGraph(dim=(400, 321, 1))
-fine_graph = fine_graph_factory.build()
-print(f"Fine graph created with {len(fine_graph.nodes)} nodes!")
-coarsener = MatrixGraphCoarsener(fine_graph, 1)
-coarsener.build()
-print("--- %s seconds ---" % (time.time() - start_time))
+finest_graph_factory = FineMatrixGraph(dim=(100, 100, 1))
+finest_graph = finest_graph_factory.build()
+pyramid = [finest_graph]
+
+print(f"Fine graph created with {len(finest_graph.nodes)} nodes!")
+while len(pyramid[-1].nodes) > 10:
+    coarsener = MatrixGraphCoarsener(pyramid[-1], len(pyramid) + 1)
+    pyramid.append(coarsener.build())
+    print(f"Graph coarsened at scale {len(pyramid)} with {len(pyramid[-1].nodes)} nodes.")

@@ -19,12 +19,10 @@ class Graph:
     edges_count: int = 0
     saliencies: Dict
     adjacency: Mapping[int, Mapping[int, float]]
-    adjacency_matrix: any
 
     def __init__(self, adjacency=None, volumes=None, nodes=None, saliencies=None):
         self.volumes = {} if volumes is None else volumes
         self.nodes = [] if nodes is None else nodes
-        self.adjacency_matrix = dok_array(shape=(len(nodes), len(nodes)), dtype=np.float32)
         self.saliencies = {} if saliencies is None else saliencies
         self.adjacency = {} if adjacency is None else copy.deepcopy(adjacency)
 
@@ -61,8 +59,6 @@ class Graph:
         :return:
         """
         self.edges_count += 1
-        self.adjacency_matrix[i, j] = value
-        self.adjacency_matrix[j, i] = value
 
         if i in self.adjacency:
             self.adjacency[i][j] = value
@@ -167,12 +163,12 @@ class Coarsener:
     fine_graph: Graph
     fine_nodes: List
     coarse_nodes: Set
-    parity = set()
-    coarse_adjacency: Mapping[int, Mapping[int, float]] = {}
-    coarse_volumes: Dict = {}
-    coarse_saliencies: Dict = {}
-    count = 0
-    max_edges = 0
+    parity: Set
+    coarse_adjacency: Mapping[int, Mapping[int, float]]
+    coarse_volumes: Dict
+    coarse_saliencies: Dict
+    count: int
+    max_edges: int
 
     def __init__(self, fine_graph: Graph, scale, beta=0.2):
         """
@@ -187,6 +183,12 @@ class Coarsener:
         self.coarse_nodes = set()
         self.scale = scale
         self.interpolation_weights: Dict = {}
+        self.parity = set()
+        self.coarse_adjacency: Mapping[int, Mapping[int, float]] = {}
+        self.coarse_volumes: Dict = {}
+        self.coarse_saliencies: Dict = {}
+        self.count = 0
+        self.max_edges = 0
 
     def calc_interpolation_weight(self, node_1, node_2) -> float:
         """
@@ -269,6 +271,7 @@ class Coarsener:
         :param value:
         :return:
         """
+
         def increment(a, b, val):
             if a in self.coarse_adjacency:
                 if b in self.coarse_adjacency[a]:
