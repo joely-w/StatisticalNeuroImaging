@@ -8,6 +8,7 @@ import numpy as np
 from scipy.sparse import dok_array, csr_matrix, csc_matrix
 
 from image import affinity
+from matplotlib import pyplot as plt
 
 
 class MatrixGraph:
@@ -16,12 +17,13 @@ class MatrixGraph:
     and coarsening them is just sparse matrix multiplication.
     """
     nodes: List
+    allowed_coarse: Set | str
     adjacency_matrix: dok_array | csr_matrix
     adjacency_matrix_columns: List[List[int]]
     volumes: Dict
     saliencies: Dict
 
-    def __init__(self, nodes=None, adjacency_matrix=None, volumes=None, saliencies=None, dim=None):
+    def __init__(self, nodes=None, adjacency_matrix=None, volumes=None, saliencies=None, dim=None, allowed=None):
         self.volumes = {} if volumes is None else copy.deepcopy(volumes)
 
         self.nodes = [] if nodes is None else copy.deepcopy(nodes)
@@ -31,6 +33,10 @@ class MatrixGraph:
             else csc_matrix(adjacency_matrix, copy=False)
 
         self.saliencies = {} if saliencies is None else copy.deepcopy(saliencies)
+        if allowed is None:
+            self.allowed_coarse = "all"
+        else:
+            self.allowed_coarse = allowed
 
     def set_adjacency(self, i: int, j: int, value: float) -> None:
         """
@@ -50,14 +56,14 @@ class MatrixGraph:
     def get_neighbours(self, i) -> list[int]:
         """
         Gets all neighbours of node i.
-        Will return empty list if node i is not in adjacency dict.
+        Will return empty list if node "i" is not in adjacency dict.
         :param i:
         :return:
         """
         return self.adjacency_matrix[:, [i]].nonzero()[0]
 
     def build_graph(self):
-        self.adjacency_matrix = self.adjacency_matrix.tocsc()
+        self.adjacency_matrix = self.adjacency_matrix.tocsr()
 
 
 class FineMatrixGraph(MatrixGraph):
@@ -117,16 +123,19 @@ class MatrixGraphCoarsener:
     fine_nodes: List
 
     coarse_nodes: Set
+    coarse_low_saliency_nodes: Set
+    coarse_saliency_sum: float
     coarse_volumes: Dict
     coarse_weights: csr_matrix
     coarse_saliencies: Dict
     interpolation_matrix: any
     fine_to_coarse: Dict
-    scale: int
 
+    scale: int
     beta = 0.1
 
     def __init__(self, fine_graph: MatrixGraph, scale: int) -> None:
+        self.coarse_saliency_sum = 0.
         self.fine_graph = fine_graph
         self.fine_nodes = fine_graph.nodes
         self.scale = scale
@@ -134,6 +143,7 @@ class MatrixGraphCoarsener:
         self.coarse_volumes = {}
         self.coarse_saliencies = {}
         self.fine_to_coarse = {}
+        self.coarse_low_saliency_nodes = set()
 
     def validate_add_block(self, node: int) -> bool:
         """
@@ -197,16 +207,20 @@ class MatrixGraphCoarsener:
         Also calculates coarse nodes volume at selection time.
         :return:
         """
-        # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
+
+        node_seq = self.fine_nodes
+
         if not self.scale == 1:
-            self.fine_nodes = sorted(self.fine_nodes, key=lambda d: self.fine_graph.volumes[d])
+            # TODO how to keep this sorted in linear time complexity? One paper mentions using binning.
+            node_seq = sorted(node_seq, key=lambda d: self.fine_graph.volumes[d])
         else:
-            self.fine_nodes = self.fine_nodes[::2] + self.fine_nodes[1::2]
+            node_seq = node_seq[::2] + node_seq[1::2]
+        print(node_seq)
         print("Selecting coarse seeds.")
-        self.coarse_nodes.add(self.fine_nodes[0])
+        self.coarse_nodes.add(node_seq[0])
         coarse_index = 0
-        for node in self.fine_nodes:
-            print(f"\r Considered {round(100 * node / len(self.fine_nodes), 2)}% of nodes", end='')
+        for node in node_seq:
+            print(f"\r Considered {round(100 * node / len(node_seq), 2)}% of nodes", end='')
             if self.validate_add_block(node):
                 self.coarse_nodes.add(node)
                 self.fine_to_coarse[node] = coarse_index
@@ -214,6 +228,7 @@ class MatrixGraphCoarsener:
                 coarse_index += 1
 
     def create_coarse_couplings(self):
+        max_neighbours = 0
         print("\n Interpolating fine nodes.")
         self.interpolation_matrix = dok_array((len(self.fine_nodes), len(self.coarse_nodes)), dtype=np.float32)
         for index, i in enumerate(self.fine_nodes):
@@ -223,13 +238,17 @@ class MatrixGraphCoarsener:
                 self.interpolation_matrix[self.fine_to_coarse[i], self.fine_to_coarse[i]] = 1
 
             for j in neighbours:
+                max_neighbours = max(len(neighbours), max_neighbours)
                 if j in self.coarse_nodes:
                     self.interpolation_matrix[i, self.fine_to_coarse[j]] = self.calc_interpolation_weight(i, j)
         print("\n Creating coarse adjacency matrix.")
-        self.coarse_weights = self.interpolation_matrix.transpose() @ self.fine_graph.adjacency_matrix @ self.interpolation_matrix
+        self.coarse_weights = csr_matrix(
+            self.interpolation_matrix.transpose() @ self.fine_graph.adjacency_matrix @ self.interpolation_matrix)
 
     def calculate_saliencies(self):
         print("Calculating coarse saliencies.")
+        self.coarse_saliency_sum = 0
+
         for i in self.coarse_nodes:
             node = self.fine_to_coarse[i]
             print(f'\r {round(node / len(self.coarse_nodes) * 100, 3)}% coarse saliencies calculated', end='')
@@ -238,6 +257,7 @@ class MatrixGraphCoarsener:
             for neighbour_weight in neighbours:
                 coupling_sum += neighbour_weight
             self.coarse_saliencies[node] = coupling_sum * 2 ** self.scale / self.coarse_volumes[node]
+            self.coarse_saliency_sum += self.coarse_saliencies[node]
 
     def build(self):
         self.generate_seeds()
@@ -245,7 +265,8 @@ class MatrixGraphCoarsener:
         self.calculate_saliencies()
         print("\n")
         return MatrixGraph(nodes=list(self.fine_to_coarse.values()), adjacency_matrix=self.coarse_weights,
-                           volumes=self.coarse_volumes, saliencies=self.coarse_saliencies, )
+                           volumes=self.coarse_volumes, saliencies=self.coarse_saliencies,
+                           allowed=self.coarse_low_saliency_nodes)
 
 
 start_time = time.time()
@@ -258,4 +279,5 @@ print(f"Fine graph created with {len(finest_graph.nodes)} nodes!")
 while len(pyramid[-1].nodes) > 10:
     coarsener = MatrixGraphCoarsener(pyramid[-1], len(pyramid) + 1)
     pyramid.append(coarsener.build())
-    print(f"Graph coarsened at scale {len(pyramid)} with {len(pyramid[-1].nodes)} nodes.")
+    print(
+        f"Graph coarsened at scale {len(pyramid)} with {len(pyramid[-1].nodes)} nodes and {pyramid[-1].adjacency_matrix.count_nonzero() / 2} edges.")
