@@ -215,7 +215,6 @@ class MatrixGraphCoarsener:
             node_seq = sorted(node_seq, key=lambda d: self.fine_graph.volumes[d])
         else:
             node_seq = node_seq[::2] + node_seq[1::2]
-        print(node_seq)
         print("Selecting coarse seeds.")
         self.coarse_nodes.add(node_seq[0])
         coarse_index = 0
@@ -232,7 +231,9 @@ class MatrixGraphCoarsener:
         print("\n Interpolating fine nodes.")
         self.interpolation_matrix = dok_array((len(self.fine_nodes), len(self.coarse_nodes)), dtype=np.float32)
         for index, i in enumerate(self.fine_nodes):
-            print(f'\r {round(index / len(self.fine_nodes) * 100, 3)}% fine nodes interpolated', end='')
+            print(
+                f'\r {round(index / len(self.fine_nodes) * 100, 3)}% fine nodes interpolated with max neighbours {max_neighbours}',
+                end='')
             neighbours = self.fine_graph.get_neighbours(i)
             if i in self.coarse_nodes:
                 self.interpolation_matrix[self.fine_to_coarse[i], self.fine_to_coarse[i]] = 1
@@ -241,9 +242,14 @@ class MatrixGraphCoarsener:
                 max_neighbours = max(len(neighbours), max_neighbours)
                 if j in self.coarse_nodes:
                     self.interpolation_matrix[i, self.fine_to_coarse[j]] = self.calc_interpolation_weight(i, j)
+
         print("\n Creating coarse adjacency matrix.")
         self.coarse_weights = csr_matrix(
             self.interpolation_matrix.transpose() @ self.fine_graph.adjacency_matrix @ self.interpolation_matrix)
+        print("Reducing coarse adjacency matrix.")
+        mask = np.abs(self.coarse_weights.data) < 0.05
+        self.coarse_weights.data[mask] = 0
+        self.coarse_weights.eliminate_zeros()
 
     def calculate_saliencies(self):
         print("Calculating coarse saliencies.")
